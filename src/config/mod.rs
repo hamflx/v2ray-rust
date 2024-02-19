@@ -13,14 +13,9 @@ pub use to_chainable_builder::ToChainableStreamBuilder;
 
 use crate::common::new_error;
 use crate::config::deserialize::{
-    default_backlog, default_grpc_path, default_http2_method, default_random_string,
-    default_relay_buffer_size, default_true, default_v2ray_geoip_path, default_v2ray_geosite_path,
-    from_str_to_address, from_str_to_cipher_kind, from_str_to_grpc_path, from_str_to_http_method,
-    from_str_to_option_address, from_str_to_path, from_str_to_security_num, from_str_to_sni,
-    from_str_to_uuid, from_str_to_ws_uri, EarlyDataUri,
+    default_backlog, default_random_string, default_relay_buffer_size, default_v2ray_geoip_path,
+    default_v2ray_geosite_path, from_str_to_address, from_str_to_security_num, from_str_to_uuid,
 };
-use crate::proxy::shadowsocks::aead_helper::CipherKind;
-use crate::proxy::shadowsocks::context::{BloomContext, SharedBloomContext};
 
 use crate::proxy::{Address, ChainStreamBuilder, ProtocolType};
 
@@ -28,7 +23,7 @@ use serde::Deserialize;
 
 use crate::config::route::build_router;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io;
 use std::io::Read;
@@ -36,8 +31,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use uuid::Uuid;
-static SS_LOCAL_SHARED_CONTEXT: once_cell::sync::Lazy<SharedBloomContext> =
-    once_cell::sync::Lazy::new(|| Arc::new(BloomContext::new(true)));
 
 #[derive(Deserialize, Clone)]
 struct VmessConfig {
@@ -52,50 +45,6 @@ struct VmessConfig {
     security_num: u8,
     tag: String,
 }
-
-#[derive(Deserialize, Clone)]
-struct TrojanConfig {
-    password: String,
-    #[serde(deserialize_with = "from_str_to_address")]
-    addr: Address,
-    tag: String,
-}
-
-#[derive(Deserialize, Clone)]
-struct TlsConfig {
-    #[serde(deserialize_with = "from_str_to_sni")]
-    sni: String,
-    cert_file: Option<String>,
-    #[serde(default = "default_true")]
-    verify_hostname: bool,
-    #[serde(default = "default_true")]
-    verify_sni: bool,
-    tag: String,
-}
-
-#[derive(Deserialize, Clone)]
-struct WebsocketConfig {
-    #[serde(deserialize_with = "from_str_to_ws_uri")]
-    uri: EarlyDataUri,
-    #[serde(default)]
-    early_data_header_name: String,
-    #[serde(default)]
-    max_early_data: usize,
-    #[serde(default)]
-    headers: BTreeMap<String, String>,
-    tag: String,
-}
-
-#[derive(Deserialize, Clone)]
-struct ShadowsocksConfig {
-    #[serde(deserialize_with = "from_str_to_address")]
-    addr: Address,
-    password: String,
-    #[serde(deserialize_with = "from_str_to_cipher_kind")]
-    method: CipherKind,
-    tag: String,
-}
-
 #[derive(Deserialize, Clone)]
 struct BlackHoleConfig {
     tag: String,
@@ -162,51 +111,6 @@ struct DomainRoutingRules {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct DokodemoDoor {
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub tproxy: bool,
-    #[serde(deserialize_with = "from_str_to_address")]
-    pub addr: Address,
-    #[serde(default, deserialize_with = "from_str_to_option_address")]
-    pub target_addr: Option<Address>,
-}
-
-#[derive(Deserialize, Clone)]
-struct Http2Config {
-    tag: String,
-    hosts: Vec<String>,
-    #[serde(default)]
-    headers: HashMap<String, String>,
-    #[serde(
-        default = "default_http2_method",
-        deserialize_with = "from_str_to_http_method"
-    )]
-    method: http::Method,
-    #[serde(deserialize_with = "from_str_to_path")]
-    path: http::uri::PathAndQuery,
-}
-
-#[derive(Deserialize, Clone)]
-struct SimpleObfsConfig {
-    tag: String,
-    #[serde(deserialize_with = "from_str_to_address")]
-    host: Address,
-}
-
-#[derive(Deserialize, Clone)]
-struct GrpcConfig {
-    tag: String,
-    host: String,
-    #[serde(
-        rename(deserialize = "service_name"),
-        deserialize_with = "from_str_to_grpc_path",
-        default = "default_grpc_path"
-    )]
-    path: http::uri::PathAndQuery,
-}
-
-#[derive(Deserialize)]
 pub struct Config {
     #[serde(default)]
     enable_api_server: bool,
@@ -218,35 +122,15 @@ pub struct Config {
     #[serde(default = "default_backlog")]
     backlog: u32,
     #[serde(default)]
-    ss: Vec<ShadowsocksConfig>,
-    #[serde(default)]
-    tls: Vec<TlsConfig>,
-    #[serde(default)]
     vmess: Vec<VmessConfig>,
-    #[serde(default)]
-    ws: Vec<WebsocketConfig>,
-    #[serde(default)]
-    trojan: Vec<TrojanConfig>,
     #[serde(default)]
     direct: Vec<DirectConfig>,
     #[serde(default)]
     blackhole: Vec<BlackHoleConfig>,
     #[serde(default)]
-    simpleobfs: Vec<SimpleObfsConfig>,
-    #[serde(default)]
-    dokodemo: Vec<DokodemoDoor>,
-    #[serde(default)]
     domain_routing_rules: Vec<DomainRoutingRules>,
     #[serde(default)]
     ip_routing_rules: Vec<IpRoutingRules>,
-    #[serde(default)]
-    h2: Vec<Http2Config>,
-    #[serde(default)]
-    grpc: Vec<GrpcConfig>,
-    #[serde(default)]
-    geosite_rules: Vec<GeoSiteRules>,
-    #[serde(default)]
-    geoip_rules: Vec<GeoIpRules>,
     #[serde(default)]
     default_outbound: String,
 
@@ -259,16 +143,9 @@ impl std::ops::Index<(ProtocolType, usize)> for Config {
 
     fn index(&self, index: (ProtocolType, usize)) -> &Self::Output {
         match index.0 {
-            ProtocolType::SS => &self.ss[index.1],
-            ProtocolType::Tls => &self.tls[index.1],
             ProtocolType::Vmess => &self.vmess[index.1],
-            ProtocolType::WS => &self.ws[index.1],
-            ProtocolType::Trojan => &self.trojan[index.1],
             ProtocolType::Direct => &self.direct[index.1],
-            ProtocolType::H2 => &self.h2[index.1],
-            ProtocolType::Grpc => &self.grpc[index.1],
             ProtocolType::Blackhole => &self.blackhole[index.1],
-            ProtocolType::SimpleObfs => &self.simpleobfs[index.1],
         }
     }
 }
@@ -292,16 +169,9 @@ impl Config {
     fn build_inner_map<'a>(&'a self) -> io::Result<HashMap<String, ChainStreamBuilder>> {
         // tag->(protocol idx, idx of protocol vec)
         let mut config_map: HashMap<&'a str, (ProtocolType, usize)> = HashMap::new();
-        insert_config_map!(self.ss, config_map);
-        insert_config_map!(self.tls, config_map);
         insert_config_map!(self.vmess, config_map);
-        insert_config_map!(self.ws, config_map);
-        insert_config_map!(self.trojan, config_map);
         insert_config_map!(self.direct, config_map);
-        insert_config_map!(self.h2, config_map);
-        insert_config_map!(self.grpc, config_map);
         insert_config_map!(self.blackhole, config_map);
-        insert_config_map!(self.simpleobfs, config_map);
         let mut inner_map = HashMap::new();
         for out in self.outbounds.iter() {
             let mut addrs = Vec::new();
@@ -326,7 +196,7 @@ impl Config {
             out.chain.iter().for_each(|t| {
                 if let Some((p, idx)) = config_map.get(t.as_str()) {
                     match *p {
-                        ProtocolType::Trojan | ProtocolType::SS | ProtocolType::Vmess => {
+                        ProtocolType::Vmess => {
                             let next_addr = addr_iter.next();
                             if next_addr.is_none() {
                                 builder.push_last_builder(self[(*p, *idx)].clone_box());
@@ -363,15 +233,15 @@ impl Config {
         let router = build_router(
             std::mem::take(&mut self.domain_routing_rules),
             std::mem::take(&mut self.ip_routing_rules),
-            std::mem::take(&mut self.geosite_rules),
-            std::mem::take(&mut self.geoip_rules),
+            Vec::new(),
+            Vec::new(),
             default_outbound_tag.to_string(),
         )?;
         Ok(ConfigServerBuilder::new(
             self.backlog,
             self.relay_buffer_size,
             std::mem::take(&mut self.inbounds),
-            std::mem::take(&mut self.dokodemo),
+            // std::mem::take(&mut self.dokodemo),
             Arc::new(router),
             Arc::new(inner_map),
             self.enable_api_server,

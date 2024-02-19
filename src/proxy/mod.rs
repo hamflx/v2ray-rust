@@ -18,19 +18,11 @@ use tokio::net::{TcpStream, UdpSocket};
 mod address;
 pub mod blackhole;
 pub mod direct;
-pub mod dokodemo_door;
-pub mod grpc;
-pub mod h2;
 pub mod http;
-pub mod shadowsocks;
-pub mod simpleobfs;
 pub mod socks;
-pub mod tls;
-pub mod trojan;
 mod udp;
 mod utils;
 pub mod vmess;
-pub mod websocket;
 
 use crate::common::new_error;
 use crate::proxy::utils::ChainStreamBuilderProtocolTypeIter;
@@ -63,21 +55,14 @@ macro_rules! debug_log {
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum ProtocolType {
-    SS,
-    Tls,
     Vmess,
-    Grpc,
-    WS,
-    Trojan,
     Direct,
-    H2,
     Blackhole,
-    SimpleObfs,
 }
 
 impl ProtocolType {
     pub fn is_uot(&self) -> bool {
-        matches!(self, ProtocolType::Vmess | ProtocolType::Trojan)
+        matches!(self, ProtocolType::Vmess)
     }
 }
 
@@ -310,7 +295,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::proxy::ProtocolType::{Trojan, Vmess, SS, WS};
+    use crate::proxy::ProtocolType::Vmess;
     use crate::proxy::{build_udp_marker_impl, ProtocolType};
     use bitvec::vec::BitVec;
 
@@ -341,19 +326,19 @@ mod tests {
         // ws vmess ss: T F F
         // ws vmess ss ss: T F F F
         // trojan ws vmess : T T F
-        let type1 = vec![WS, Vmess, SS];
+        let type1 = vec![Vmess];
         let b1 = vec![true, false, false];
         assert!(test_eq_bit_vec(
             from_protocol_type_to_udp_marker_bit_vec(type1.into_iter().rev()),
             b1
         ));
-        let type2 = vec![WS, Vmess, SS, SS];
+        let type2 = vec![Vmess];
         let b2 = vec![true, false, false, false];
         assert!(test_eq_bit_vec(
             from_protocol_type_to_udp_marker_bit_vec(type2.into_iter().rev()),
             b2,
         ));
-        let type3 = vec![Trojan, WS, Vmess];
+        let type3 = vec![Vmess];
         let b3 = vec![true, true, false];
         assert!(test_eq_bit_vec(
             from_protocol_type_to_udp_marker_bit_vec(type3.into_iter().rev()),

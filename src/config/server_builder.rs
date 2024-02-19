@@ -1,7 +1,5 @@
-use crate::api::{ApiLatencyServer, ApiServer};
 use crate::common::net::{relay, relay_with_atomic_counter};
-use crate::config::{DokodemoDoor, Inbounds, Router};
-use crate::proxy::dokodemo_door::build_dokodemo_door_listener;
+use crate::config::{Inbounds, Router};
 use crate::proxy::http::HttpInbound;
 use crate::proxy::socks::socks5::{Socks5Stream, Socks5UdpDatagram};
 use crate::proxy::socks::SOCKS_VERSION;
@@ -23,7 +21,6 @@ pub struct ConfigServerBuilder {
     backlog: u32,
     relay_buffer_size: usize,
     inbounds: Vec<Inbounds>,
-    dokodemo: Vec<DokodemoDoor>,
     router: Arc<Router>,
     inner_map: Arc<HashMap<String, ChainStreamBuilder>>,
     enable_api_server: bool,
@@ -35,7 +32,6 @@ impl ConfigServerBuilder {
         backlog: u32,
         relay_buffer_size: usize,
         inbounds: Vec<Inbounds>,
-        dokodemo: Vec<DokodemoDoor>,
         router: Arc<Router>,
         inner_map: Arc<HashMap<String, ChainStreamBuilder>>,
         enable_api_server: bool,
@@ -45,7 +41,6 @@ impl ConfigServerBuilder {
             backlog,
             relay_buffer_size,
             inbounds,
-            dokodemo,
             router,
             inner_map,
             enable_api_server,
@@ -91,84 +86,10 @@ impl ConfigServerBuilder {
         }
         let inner_map = (&self.inner_map).clone();
         {
-            let api_inner_map = (&self.inner_map).clone();
             actix_rt::System::new().block_on(async move {
-                if enable_api_server {
-                    info!("api server listening on: {}", self.api_server_addr);
-                    tokio::spawn(async move {
-                        let api_server = ApiServer::new_server();
-                        let api_latency_server = ApiLatencyServer::new_server(api_inner_map);
-                        tonic::transport::Server::builder()
-                            .add_service(api_server)
-                            .add_service(api_latency_server)
-                            .serve(self.api_server_addr.get_sock_addr())
-                            .await?;
-                        Ok::<(), tonic::transport::Error>(())
-                    });
-                }
                 let mut server = Server::build();
                 server = server.backlog(self.backlog);
                 info!("backlog is:{}", self.backlog);
-                for door in self.dokodemo.iter_mut() {
-                    let inner_map = inner_map.clone();
-                    let router = router.clone();
-                    let target_addr = door.target_addr.take();
-                    let std_listener = build_dokodemo_door_listener(door, self.backlog)?;
-                    server = server.listen("dokodemo", std_listener, move || {
-                        let target_addr = target_addr.clone();
-                        let inner_map = inner_map.clone();
-                        let router = router.clone();
-                        fn_service(move |io: TcpStream| {
-                            let target_addr = target_addr.clone();
-                            let inner_map = inner_map.clone();
-                            let router = router.clone();
-                            async move {
-                                let dokodemo_door_addr = io.local_addr()?;
-                                if let Some(addr) = target_addr {
-                                    let out_stream = addr.connect_tcp().await?;
-                                    return relay(io, out_stream, self.relay_buffer_size).await;
-                                }
-                                let ob = router.match_socket_addr(&dokodemo_door_addr);
-                                info!(
-                                    "routing dokodemo addr {} to outbound:{}",
-                                    dokodemo_door_addr, ob
-                                );
-                                let stream_builder = inner_map.get(ob).unwrap();
-                                let out_stream =
-                                    stream_builder.build_tcp(dokodemo_door_addr.into()).await?;
-                                if enable_api_server {
-                                    let in_down = COUNTER_MAP
-                                        .get()
-                                        .unwrap()
-                                        .get("inbound>>>dokodemo>>>traffic>>>downlink");
-                                    let in_up = COUNTER_MAP
-                                        .get()
-                                        .unwrap()
-                                        .get("inbound>>>dokodemo>>>traffic>>>uplink");
-                                    let out_down =
-                                        format!("outbound>>>{}>>>traffic>>>downlink", ob);
-                                    let out_up = format!("outbound>>>{}>>>traffic>>>uplink", ob);
-                                    let out_down =
-                                        COUNTER_MAP.get().unwrap().get(out_down.as_str()).unwrap();
-                                    let out_up =
-                                        COUNTER_MAP.get().unwrap().get(out_up.as_str()).unwrap();
-                                    return relay_with_atomic_counter(
-                                        io,
-                                        out_stream,
-                                        in_up.unwrap(),
-                                        in_down.unwrap(),
-                                        out_up,
-                                        out_down,
-                                        self.relay_buffer_size,
-                                    )
-                                    .await;
-                                } else {
-                                    return relay(io, out_stream, self.relay_buffer_size).await;
-                                }
-                            }
-                        })
-                    })?;
-                }
                 for inbound in self.inbounds.into_iter() {
                     let inner_map_1 = inner_map.clone();
                     let router_1 = router.clone();
